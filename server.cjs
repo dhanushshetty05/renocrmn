@@ -55,6 +55,7 @@ app.get('/api/scrape', (req, res) => {
   pythonProcess.on('close', (code) => {
     console.log(`[Server] Process exited with code ${code}`);
     if (code !== 0) {
+      console.error(`[Server Error] Scraper stderr:\n${stderrData}`);
       return res.status(500).json({ 
         success: false, 
         error: `Scraper exited with code ${code}`,
