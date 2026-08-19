@@ -91,9 +91,10 @@ async def scrape_google_maps(search_query, location_query, max_results=20):
     print(f"==================================================\n")
     
     async with async_playwright() as p:
-        # Launch Chromium (run headful so Google Maps doesn't trigger captcha as easily)
-        print("[1/5] Launching browser engine...")
-        browser = await p.chromium.launch(headless=False)
+        # Launch Chromium (headless in container/production, headful on Windows for local visibility)
+        import os
+        run_headless = "RENDER" in os.environ or os.name != "nt"
+        browser = await p.chromium.launch(headless=run_headless)
         context = await browser.new_context(
             user_agent=random.choice(USER_AGENTS),
             viewport={'width': 1280, 'height': 900}
