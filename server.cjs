@@ -36,9 +36,10 @@ app.get('/api/scrape', (req, res) => {
   const location = req.query.location || 'chennai';
   const limit = req.query.limit || '10';
 
-  console.log(`[Server] Starting python scraper.py "${query}" "${location}" ${limit}`);
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  console.log(`[Server] Starting ${pythonCmd} scraper.py "${query}" "${location}" ${limit}`);
   
-  const pythonProcess = spawn('python', ['scraper.py', query, location, limit]);
+  const pythonProcess = spawn(pythonCmd, ['scraper.py', query, location, limit]);
 
   let stdoutData = '';
   let stderrData = '';
