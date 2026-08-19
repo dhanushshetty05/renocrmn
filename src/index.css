@@ -1,0 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-brand-blue-deep: #1E40AF;
+  --color-brand-blue-dark: #0F172A;
+  --color-brand-blue-sky: #3B82F6;
+  --color-brand-blue-light: #F8FAFC;
+  --font-sans: 'Inter', 'system-ui', 'sans-serif';
+
+  /* Custom text sizes scale up slightly for better medium readability, without affecting spacing units */
+  --font-size-xs: 0.8rem;       /* 12.8px (Standard is 12px) */
+  --font-size-sm: 0.925rem;     /* 14.8px (Standard is 14px) */
+  --font-size-base: 1rem;       /* 16px */
+  --font-size-lg: 1.15rem;      /* 18.4px */
+  --font-size-xl: 1.35rem;      /* 21.6px */
+  --font-size-2xl: 1.625rem;    /* 26px */
+}
+
+html {
+  font-size: 16px; /* Reset root font scale back to standard 16px for perfect layout alignments */
+}
+
+body {
+  background-color: white;
+  color: var(--color-brand-blue-dark);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Global overrides for absolute small text classes to ensure comfortable legibility */
+.text-\[9px\] {
+  font-size: 0.725rem !important; /* ~11.6px instead of 9px */
+}
+
+.text-\[10px\] {
+  font-size: 0.775rem !important; /* ~12.4px instead of 10px */
+}
+
+.text-\[11px\] {
+  font-size: 0.825rem !important; /* ~13.2px instead of 11px */
+}
+
+/* Custom Scrollbar Styles for modern premium feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
