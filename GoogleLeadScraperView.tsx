@@ -154,78 +154,103 @@ export const GoogleLeadScraperView: React.FC<GoogleLeadScraperViewProps> = ({ on
       setCurrentActionLog("Connecting to Google Maps in real-time...");
       setProgress(10);
 
-      // Increment progress slowly in the background to show live activity
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) return prev;
-          return prev + Math.floor(Math.random() * 4) + 1;
-        });
-      }, 1500);
-
+      // Start the scraper backend process (instantly responds, bypassing Render 30s timeout)
       const apiBaseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
       const response = await fetch(`${apiBaseUrl}/api/scrape?query=${encodeURIComponent(term)}&location=${encodeURIComponent(location)}&limit=${numPlaces}`);
-      clearInterval(progressInterval);
-
+      
       if (!response.ok) {
-        let errMsg = `Real-time server returned status ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData && errData.error) {
-            errMsg += `: ${errData.error}`;
-            if (errData.stderr) {
-              console.error("[Scraper API Error Stderr]:", errData.stderr);
-              errMsg += `\nStderr: ${errData.stderr}`;
-            }
-          }
-        } catch (e) {
-          // Response was not JSON
-        }
-        throw new Error(errMsg);
+        throw new Error(`Real-time server returned status ${response.status}`);
       }
 
-      const data = await response.json();
+      const startData = await response.json();
+      if (!startData.success) {
+        throw new Error(startData.message || 'Failed to start scraper task');
+      }
 
-      if (data.success) {
-        const stdoutLogs = data.logs 
-          ? data.logs.split('\n').filter((line: string) => line.trim().length > 0)
-          : [];
+      // Begin status polling loop
+      setCurrentActionLog("Scraping started in background. Polling for results...");
+      
+      const pollPromise = new Promise<void>((resolve, reject) => {
+        let attempts = 0;
+        const maxAttempts = 150; // 5 minutes max
         
-        setLogs(prev => [...prev, ...stdoutLogs]);
-        setProgress(100);
+        const pollInterval = setInterval(async () => {
+          attempts++;
+          if (attempts > maxAttempts) {
+            clearInterval(pollInterval);
+            reject(new Error("Request timed out: Scraping job took longer than 5 minutes."));
+            return;
+          }
 
-        const queryLower = term.toLowerCase();
-        let baseService = "uPVC Windows & Doors";
-        if (queryLower.includes('plumb')) {
-          baseService = "Plumbing Services";
-        } else if (queryLower.includes('electr')) {
-          baseService = "Electrical Engineering";
-        } else if (queryLower.includes('mesh')) {
-          baseService = "Insect Mesh Systems";
-        }
+          try {
+            const statusResponse = await fetch(`${apiBaseUrl}/api/scrape/status`);
+            if (!statusResponse.ok) {
+              clearInterval(pollInterval);
+              reject(new Error(`Status query failed with status ${statusResponse.status}`));
+              return;
+            }
 
-        const realLeads = data.leads
-          .filter((lead: any) => lead["Business Name"] && lead["Business Name"] !== 'Results')
-          .map((lead: any) => ({
-            clientName: lead["Business Name"],
-            mobile: lead["Phone"] || 'N/A',
-            address: lead["Address"] || 'N/A',
-            website: lead["Website"] || 'N/A',
-            email: lead["Email"] || 'N/A',
-            serviceRequired: baseService,
-            source: 'Web Scrape'
-          }));
+            const statusData = await statusResponse.json();
+            
+            // Stream the logs in real-time
+            if (statusData.logs) {
+              const stdoutLogs = statusData.logs
+                .split('\n')
+                .filter((line: string) => line.trim().length > 0);
+              setLogs(stdoutLogs);
+            }
 
-        setScrapedLeads(realLeads);
-        setIsScraping(false);
-        setCurrentActionLog("Scraping finished!");
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval);
+              setProgress(100);
 
-        if (addToast) {
-          addToast('success', 'Real-time Scrape Completed', `Extracted ${realLeads.length} actual business leads from Google Maps.`);
-        }
-        return;
-      } else {
-        throw new Error(data.error || 'Scraper run error');
-      }
+              const queryLower = term.toLowerCase();
+              let baseService = "uPVC Windows & Doors";
+              if (queryLower.includes('plumb')) {
+                baseService = "Plumbing Services";
+              } else if (queryLower.includes('electr')) {
+                baseService = "Electrical Engineering";
+              } else if (queryLower.includes('mesh')) {
+                baseService = "Insect Mesh Systems";
+              }
+
+              const realLeads = (statusData.leads || [])
+                .filter((lead: any) => lead["Business Name"] && lead["Business Name"] !== 'Results')
+                .map((lead: any) => ({
+                  clientName: lead["Business Name"],
+                  mobile: lead["Phone"] || 'N/A',
+                  address: lead["Address"] || 'N/A',
+                  website: lead["Website"] || 'N/A',
+                  email: lead["Email"] || 'N/A',
+                  serviceRequired: baseService,
+                  source: 'Web Scrape'
+                }));
+
+              setScrapedLeads(realLeads);
+              setIsScraping(false);
+              setCurrentActionLog("Scraping finished!");
+
+              if (addToast) {
+                addToast('success', 'Real-time Scrape Completed', `Extracted ${realLeads.length} actual business leads from Google Maps.`);
+              }
+              resolve();
+            } else if (statusData.status === 'failed') {
+              clearInterval(pollInterval);
+              reject(new Error(statusData.error || 'Background scraper process failed'));
+            } else {
+              // status is 'running' - calculate progress estimate based on attempts
+              setProgress(Math.min(95, 10 + Math.floor((attempts / 40) * 80)));
+            }
+
+          } catch (err: any) {
+            clearInterval(pollInterval);
+            reject(err);
+          }
+        }, 2000);
+      });
+
+      await pollPromise;
+      return;
 
     } catch (apiError: any) {
       console.warn("Real-time scraping API offline, running simulation sandbox:", apiError);
