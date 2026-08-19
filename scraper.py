@@ -81,8 +81,8 @@ async def extract_email_from_website(page, website_url):
 
 async def scrape_google_maps(search_query, location_query, max_results=20):
     full_query = f"{search_query} in {location_query}"
-    # Direct search URL bypasses typing & search buttons
-    search_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}+in+{location_query.replace(' ', '+')}"
+    # Direct search URL bypasses typing & search buttons, forcing English UI to ensure consistent consent selectors
+    search_url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}+in+{location_query.replace(' ', '+')}?hl=en"
     
     print(f"\n==================================================")
     print(f"Starting Maps Extraction: '{full_query}'")
@@ -139,25 +139,13 @@ async def scrape_google_maps(search_query, location_query, max_results=20):
         
         scroll_attempts = 15
         for s in range(scroll_attempts):
-            # Fetch current card links
-            cards = await page.query_selector_all('a[href*="/maps/place/"]')
-            print(f"  -> Scroll pass {s+1}/{scroll_attempts}: Loaded {len(cards)} listings...")
-            if len(cards) >= max_results:
+            # Target last listing element to scroll into view naturally
+            current_cards = await page.query_selector_all('a[href*="/maps/place/"]')
+            if len(current_cards) >= max_results:
                 break
-            
-            if cards:
-                try:
-                    # Scroll the last found card into view to trigger lazy loading
-                    await cards[-1].scroll_into_view_if_needed()
-                except Exception as scroll_err:
-                    pass
-            else:
-                # Fallback: Scroll the body if no cards are loaded yet
-                try:
-                    await page.mouse.wheel(0, 2000)
-                except Exception:
-                    pass
-            await page.wait_for_timeout(2500)
+            if current_cards:
+                await current_cards[-1].scroll_into_view_if_needed()
+            await page.wait_for_timeout(1000)
             
         # Query place card links
         cards = await page.query_selector_all('a[href*="/maps/place/"]')
@@ -206,14 +194,14 @@ async def scrape_google_maps(search_query, location_query, max_results=20):
                     
                 # Hover and click to expand place panel details
                 await target_card.scroll_into_view_if_needed()
-                await target_card.click()
+                await target_card.click(force=True)
                 
                 # Wait for the detail panel contents to be fetched and rendered
                 try:
                     await page.wait_for_selector('[data-item-id*="address"]', timeout=8000)
                 except Exception:
                     pass
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(2000)
                 
                 # Use target name directly to bypass h1 header tag collisions with the sidebar header
                 name = target_name
