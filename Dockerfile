@@ -11,8 +11,8 @@ COPY package.json package-lock.json ./
 # Install Node dependencies
 RUN npm install
 
-# Install Python dependencies
-RUN pip3 install pandas playwright
+# Install Python dependencies and download Chromium browser
+RUN pip3 install pandas playwright && python3 -m playwright install chromium
 
 # Copy source code
 COPY . .
