@@ -75,60 +75,6 @@ export const GoogleLeadScraperView: React.FC<GoogleLeadScraperViewProps> = ({ on
     setSearchTerms(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Helper generator to create localized, query-specific mock results
-  const generateMockLeads = (query: string, loc: string, count: number): any[] => {
-    const queryLower = query.toLowerCase();
-    const city = loc.charAt(0).toUpperCase() + loc.slice(1);
-    
-    // Determine services based on search terms
-    let baseServices = ["General Consulting", "Office Maintenance"];
-    
-    if (queryLower.includes('plumb')) {
-      baseServices = ["Leak Repair", "Drain Unblocking"];
-    } else if (queryLower.includes('construct') || queryLower.includes('build')) {
-      baseServices = ["uPVC Sliding Door", "Casement Window"];
-    } else if (queryLower.includes('electr')) {
-      baseServices = ["Power Distribution", "Wiring Overhaul"];
-    } else if (queryLower.includes('mesh') || queryLower.includes('window')) {
-      baseServices = ["Pleated Mesh", "Magnetic Net"];
-    }
-
-    const businessPrefixes = ["Sri", "Supreme", "Apex", "Vanguard", "Royal", "Global", "Classic", "Metro", "Prime"];
-    const businessNouns = ["Constructions", "Infra Projects", "Builders", "Contractors", "Associates", "Structures", "Developers"];
-    const chennaiAreas = ["T. Nagar", "OMR Road", "Velachery", "Adyar", "Mylapore", "Anna Nagar", "Guindy", "Nungambakkam"];
-    const genericAreas = ["Industrial Area", "Main Business District", "Sector 4", "Downtown Ring Road", "High Street"];
-    
-    const areas = loc.toLowerCase().includes('chennai') ? chennaiAreas : genericAreas;
-    const phonePrefix = loc.toLowerCase().includes('chennai') ? "+91 44" : "+1 512";
-    
-    const results: any[] = [];
-    const actualCount = Math.min(count, 8); // limit mock display for aesthetic spacing
-    
-    for (let i = 0; i < actualCount; i++) {
-      const prefix = businessPrefixes[Math.floor(Math.random() * businessPrefixes.length)];
-      const noun = businessNouns[Math.floor(Math.random() * businessNouns.length)];
-      const name = `${prefix} ${noun}`;
-      const cleanNameKey = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const domain = `${cleanNameKey}.in`;
-      
-      const area = areas[Math.floor(Math.random() * areas.length)];
-      const address = `${Math.floor(100 + Math.random() * 900)}, ${area}, ${city} - ${600000 + Math.floor(Math.random() * 100)}`;
-      const phone = `${phonePrefix}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(100 + Math.random() * 900)}`;
-      const email = `contact@${domain}`;
-
-      results.push({
-        clientName: name,
-        mobile: phone,
-        address: address,
-        email: email,
-        website: `https://www.${domain}`,
-        serviceRequired: baseServices[Math.floor(Math.random() * baseServices.length)],
-        source: 'Web Scrape'
-      });
-    }
-    return results;
-  };
-
   // Triggering the real-time Playwright execution API (or falling back to simulation logs)
   const startScrapingSimulation = async () => {
     if (searchTerms.length === 0) {
@@ -154,144 +100,116 @@ export const GoogleLeadScraperView: React.FC<GoogleLeadScraperViewProps> = ({ on
       setCurrentActionLog("Connecting to Google Maps in real-time...");
       setProgress(10);
 
-      // Increment progress slowly in the background to show live activity
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) return prev;
-          return prev + Math.floor(Math.random() * 4) + 1;
-        });
-      }, 1500);
-
+      // Start the scraper backend process (instantly responds, bypassing Render 30s timeout)
       const apiBaseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
       const response = await fetch(`${apiBaseUrl}/api/scrape?query=${encodeURIComponent(term)}&location=${encodeURIComponent(location)}&limit=${numPlaces}`);
-      clearInterval(progressInterval);
-
+      
       if (!response.ok) {
         throw new Error(`Real-time server returned status ${response.status}`);
       }
 
-      const data = await response.json();
-
-      if (data.success) {
-        const stdoutLogs = data.logs 
-          ? data.logs.split('\n').filter((line: string) => line.trim().length > 0)
-          : [];
-        
-        setLogs(prev => [...prev, ...stdoutLogs]);
-        setProgress(100);
-
-        const queryLower = term.toLowerCase();
-        let baseService = "uPVC Windows & Doors";
-        if (queryLower.includes('plumb')) {
-          baseService = "Plumbing Services";
-        } else if (queryLower.includes('electr')) {
-          baseService = "Electrical Engineering";
-        } else if (queryLower.includes('mesh')) {
-          baseService = "Insect Mesh Systems";
-        }
-
-        const realLeads = data.leads
-          .filter((lead: any) => lead["Business Name"] && lead["Business Name"] !== 'Results')
-          .map((lead: any) => ({
-            clientName: lead["Business Name"],
-            mobile: lead["Phone"] || 'N/A',
-            address: lead["Address"] || 'N/A',
-            website: lead["Website"] || 'N/A',
-            email: lead["Email"] || 'N/A',
-            serviceRequired: baseService,
-            source: 'Web Scrape'
-          }));
-
-        setScrapedLeads(realLeads);
-        setIsScraping(false);
-        setCurrentActionLog("Scraping finished!");
-
-        if (addToast) {
-          addToast('success', 'Real-time Scrape Completed', `Extracted ${realLeads.length} actual business leads from Google Maps.`);
-        }
-        return;
-      } else {
-        throw new Error(data.error || 'Scraper run error');
+      const startData = await response.json();
+      if (!startData.success) {
+        throw new Error(startData.message || 'Failed to start scraper task');
       }
 
+      // Begin status polling loop
+      setCurrentActionLog("Scraping started in background. Polling for results...");
+      
+      const pollPromise = new Promise<void>((resolve, reject) => {
+        let attempts = 0;
+        const maxAttempts = 150; // 5 minutes max
+        
+        const pollInterval = setInterval(async () => {
+          attempts++;
+          if (attempts > maxAttempts) {
+            clearInterval(pollInterval);
+            reject(new Error("Request timed out: Scraping job took longer than 5 minutes."));
+            return;
+          }
+
+          try {
+            const statusResponse = await fetch(`${apiBaseUrl}/api/scrape/status`);
+            if (!statusResponse.ok) {
+              clearInterval(pollInterval);
+              reject(new Error(`Status query failed with status ${statusResponse.status}`));
+              return;
+            }
+
+            const statusData = await statusResponse.json();
+            
+            // Stream the logs in real-time
+            if (statusData.logs) {
+              const stdoutLogs = statusData.logs
+                .split('\n')
+                .filter((line: string) => line.trim().length > 0);
+              setLogs(stdoutLogs);
+            }
+
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval);
+              setProgress(100);
+
+              const queryLower = term.toLowerCase();
+              let baseService = "uPVC Windows & Doors";
+              if (queryLower.includes('plumb')) {
+                baseService = "Plumbing Services";
+              } else if (queryLower.includes('electr')) {
+                baseService = "Electrical Engineering";
+              } else if (queryLower.includes('mesh')) {
+                baseService = "Insect Mesh Systems";
+              }
+
+              const realLeads = (statusData.leads || [])
+                .filter((lead: any) => lead["Business Name"] && lead["Business Name"] !== 'Results')
+                .map((lead: any) => ({
+                  clientName: lead["Business Name"],
+                  mobile: lead["Phone"] || 'N/A',
+                  address: lead["Address"] || 'N/A',
+                  website: lead["Website"] || 'N/A',
+                  email: lead["Email"] || 'N/A',
+                  serviceRequired: baseService,
+                  source: 'Web Scrape'
+                }));
+
+              setScrapedLeads(realLeads);
+              setIsScraping(false);
+              setCurrentActionLog("Scraping finished!");
+
+              if (addToast) {
+                addToast('success', 'Real-time Scrape Completed', `Extracted ${realLeads.length} actual business leads from Google Maps.`);
+              }
+              resolve();
+            } else if (statusData.status === 'failed') {
+              clearInterval(pollInterval);
+              reject(new Error(statusData.error || 'Background scraper process failed'));
+            } else {
+              // status is 'running' - calculate progress estimate based on attempts
+              setProgress(Math.min(95, 10 + Math.floor((attempts / 40) * 80)));
+            }
+
+          } catch (err: any) {
+            clearInterval(pollInterval);
+            reject(err);
+          }
+        }, 2000);
+      });
+
+      await pollPromise;
+      return;
     } catch (apiError: any) {
-      console.warn("Real-time scraping API offline, running simulation sandbox:", apiError);
+      console.error("Real-time scraping API error:", apiError);
       setLogs(prev => [
         ...prev,
-        `[Warning] Scraper API offline: ${apiError.message || apiError}`,
-        `[Scraper] Redirecting run to local high-fidelity sandbox simulator...`
+        `[Error] Real-time Scraper failed: ${apiError.message || apiError}`,
+        `[Scraper] Run stopped. Please check server status or query parameters.`
       ]);
-      await new Promise(r => setTimeout(r, 1200));
-    }
-
-    // 2. High-fidelity Sandbox Simulation Fallback
-    const runLogs = [
-      `[Playwright] Initializing headless browser (Chromium)...`,
-      `[Playwright] Rotating User-Agent headers...`,
-      `[Playwright] Context created. User-Agent set to: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...`,
-      `[Playwright] Opening target URL: https://www.google.com/maps`,
-      `[Playwright] Maps page fully loaded. Searching for query parameters...`
-    ];
-
-    // Push initial setup logs
-    for (let i = 0; i < runLogs.length; i++) {
-      setLogs(prev => [...prev, runLogs[i]]);
-      await new Promise(r => setTimeout(r, 700));
-    }
-
-    // Process search terms
-    let totalCollected: any[] = [];
-    for (let tIndex = 0; tIndex < searchTerms.length; tIndex++) {
-      const currentTerm = searchTerms[tIndex];
-      setLogs(prev => [...prev, `[Scraper] Query: "${currentTerm}" in location: "${location}"`]);
-      setCurrentActionLog(`Searching Maps for "${currentTerm}"...`);
-      setProgress(15 + tIndex * 20);
-      await new Promise(r => setTimeout(r, 1200));
-
-      setLogs(prev => [...prev, `[Playwright] Submitting search input. Intercepting results feed...`]);
-      await new Promise(r => setTimeout(r, 800));
-
-      setLogs(prev => [...prev, `[Scraper] infinite-scroll initiated on feed element. Scrolling to load listings...`]);
-      for (let s = 1; s <= 3; s++) {
-        setLogs(prev => [...prev, `  --> [Scroll pass ${s}] Scrolling down container. Loaded more DOM items...`]);
-        await new Promise(r => setTimeout(r, 900));
+      setIsScraping(false);
+      setCurrentActionLog("Scraping failed");
+      setProgress(0);
+      if (addToast) {
+        addToast('error', 'Scraper Failed', apiError.message || 'Scraper run failed');
       }
-
-      const mockSet = generateMockLeads(currentTerm, location, numPlaces);
-      setLogs(prev => [...prev, `[Playwright] Scroll limits met. Found ${mockSet.length} potential business listings.`]);
-      await new Promise(r => setTimeout(r, 1000));
-
-      // Individual lead detailing
-      for (let l = 0; l < mockSet.length; l++) {
-        const leadObj = mockSet[l];
-        setCurrentActionLog(`Extracting details from: ${leadObj.clientName}`);
-        setLogs(prev => [
-          ...prev, 
-          `[Playwright] Expanding detail panel for listing [${l+1}/${mockSet.length}] "${leadObj.clientName}"`,
-          `  --> Found Phone: ${leadObj.mobile} | Address: ${leadObj.address}`,
-          `  --> Scraped URL: ${leadObj.website}. Scanning homepage for decision maker emails...`,
-          `  --> [Contact Enrichment] Extracted verified email ID: ${leadObj.email}`
-        ]);
-        totalCollected.push(leadObj);
-        setProgress(Math.min(90, Math.floor(40 + (l / mockSet.length) * 50)));
-        await new Promise(r => setTimeout(r, 800));
-      }
-    }
-
-    setProgress(95);
-    setLogs(prev => [
-      ...prev,
-      `[Playwright] All search queries fully evaluated. Closing context...`,
-      `[Scraper] Export compiling. Packaging leads list into database tables structure...`,
-      `[SUCCESS] File 'leads.csv' compiled successfully. ${totalCollected.length} contacts extracted!`
-    ]);
-    setCurrentActionLog('Scraping finished!');
-    setScrapedLeads(totalCollected);
-    setProgress(100);
-    setIsScraping(false);
-
-    if (addToast) {
-      addToast('success', 'Extraction Completed', `Scraped ${totalCollected.length} business leads from Google Maps.`);
     }
   };
 
