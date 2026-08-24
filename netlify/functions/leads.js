@@ -139,25 +139,31 @@ export const handler = async (event, context) => {
           throw new Error('Database transaction failed');
         }
       } else {
-        // Local Development Mode: Append to project root leads.csv database
+        // Local Development Mode: Append to /tmp/leads.csv in serverless or local process.cwd() in dev
         console.log(`[Database Fallback] Appending lead ${leadId} to leads.csv: ${cleanName}`);
-        const csvPath = path.resolve(process.cwd(), 'leads.csv');
+        try {
+          const targetDir = process.env.NETLIFY || process.env.AWS_EXECUTION_ENV ? '/tmp' : process.cwd();
+          const csvPath = path.resolve(targetDir, 'leads.csv');
 
-        // Check file status to format CSV
-        const fileExists = fs.existsSync(csvPath);
-        if (!fileExists) {
-          fs.writeFileSync(csvPath, 'Business Name,Phone,Address,Website,Email\n', 'utf8');
+          // Check file status to format CSV
+          const fileExists = fs.existsSync(csvPath);
+          if (!fileExists) {
+            fs.writeFileSync(csvPath, 'Business Name,Phone,Address,Website,Email\n', 'utf8');
+          }
+
+          // Format CSV record, escaping quotation marks
+          const escapedName = cleanName.replace(/"/g, '""');
+          const escapedPhone = cleanPhone.replace(/"/g, '""');
+          const escapedAddress = `Website Ingest: ${cleanSourcePage}`.replace(/"/g, '""');
+          const escapedWebsite = cleanRequirements.replace(/"/g, '""');
+          const escapedEmail = cleanEmail.replace(/"/g, '""');
+
+          const csvLine = `"${escapedName}","${escapedPhone}","${escapedAddress}","${escapedWebsite}","${escapedEmail}"\n`;
+          fs.appendFileSync(csvPath, csvLine, 'utf8');
+        } catch (csvErr) {
+          console.warn(`[Database Warning] Local CSV write fallback failed: ${csvErr.message}`);
+          // Do not throw the error, allow the response to succeed so customers don't see a website form crash
         }
-
-        // Format CSV record, escaping quotation marks
-        const escapedName = cleanName.replace(/"/g, '""');
-        const escapedPhone = cleanPhone.replace(/"/g, '""');
-        const escapedAddress = `Website Ingest: ${cleanSourcePage}`.replace(/"/g, '""');
-        const escapedWebsite = cleanRequirements.replace(/"/g, '""');
-        const escapedEmail = cleanEmail.replace(/"/g, '""');
-
-        const csvLine = `"${escapedName}","${escapedPhone}","${escapedAddress}","${escapedWebsite}","${escapedEmail}"\n`;
-        fs.appendFileSync(csvPath, csvLine, 'utf8');
       }
 
       return {
