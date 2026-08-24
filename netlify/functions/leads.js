@@ -183,6 +183,111 @@ export const handler = async (event, context) => {
     }
   }
 
+  // Helper to parse CSV lines with quoted commas
+  const parseCSVLine = (line) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current);
+    return result.map(s => s.trim().replace(/^"|"$/g, ''));
+  };
+
+  // 3. Handle GET request to fetch leads
+  if (event.httpMethod === 'GET') {
+    const crmOrigin = origin || '';
+    const isCrmAllowed = ALLOWED_ORIGINS.includes(crmOrigin) || crmOrigin.includes('netlify.app');
+    
+    const getCorsHeaders = {
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Content-Type': 'application/json'
+    };
+    
+    if (isCrmAllowed) {
+      getCorsHeaders['Access-Control-Allow-Origin'] = crmOrigin;
+    } else {
+      getCorsHeaders['Access-Control-Allow-Origin'] = '*'; // Allow public GET for dashboard sync
+    }
+
+    try {
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_KEY;
+
+      let leads = [];
+
+      if (supabaseUrl && supabaseKey) {
+        // Fetch leads from Supabase
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        const { data, error } = await supabase
+          .from('Lead')
+          .select('*')
+          .order('createdAt', { ascending: false });
+
+        if (error) {
+          throw new Error(`Supabase query failed: ${error.message}`);
+        }
+        leads = data || [];
+      } else {
+        // Fallback: Read leads from /tmp/leads.csv
+        const targetDir = process.env.NETLIFY || process.env.AWS_EXECUTION_ENV ? '/tmp' : process.cwd();
+        const csvPath = path.resolve(targetDir, 'leads.csv');
+
+        if (fs.existsSync(csvPath)) {
+          const csvData = fs.readFileSync(csvPath, 'utf8');
+          const lines = csvData.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+          
+          if (lines.length > 1) {
+            const headers = parseCSVLine(lines[0]);
+            for (let i = 1; i < lines.length; i++) {
+              const values = parseCSVLine(lines[i]);
+              const entry = {};
+              headers.forEach((header, index) => {
+                entry[header] = values[index] ? values[index] : 'N/A';
+              });
+              
+              // Map to CRM schema format
+              leads.push({
+                id: entry.id || `L-${Math.floor(1000 + Math.random() * 9000)}`,
+                name: entry["Business Name"] || entry.name || 'N/A',
+                phone: entry["Phone"] || entry.phone || 'N/A',
+                email: entry["Email"] || entry.email || 'N/A',
+                requirements: entry["Website"] || entry.requirements || 'N/A',
+                sourcePage: entry["Address"] || entry.sourcePage || 'N/A',
+                status: entry.status || 'NEW',
+                createdAt: entry.createdAt || new Date().toISOString()
+              });
+            }
+          }
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers: getCorsHeaders,
+        body: JSON.stringify({ success: true, leads })
+      };
+
+    } catch (err) {
+      console.error('[Error] Failed to fetch leads:', err.message);
+      return {
+        statusCode: 500,
+        headers: getCorsHeaders,
+        body: JSON.stringify({ error: `Internal Server Error: ${err.message}` })
+      };
+    }
+  }
+
   // Reject all other methods
   return {
     statusCode: 405,
