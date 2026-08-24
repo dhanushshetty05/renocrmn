@@ -49,10 +49,62 @@ function App() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
+  // Synchronize remote leads from Netlify database into local storage CRM
+  const syncRemoteLeads = async () => {
+    try {
+      const response = await fetch('/api/leads');
+      if (!response.ok) return;
+      const data = await response.json();
+      
+      if (data.success && Array.isArray(data.leads)) {
+        const localLeads = RenoletDatabase.getLeads();
+        let mergedCount = 0;
+        const updatedLeads = [...localLeads];
+        
+        data.leads.forEach((remoteLead: any) => {
+          // Check if lead already exists in local storage by phone or ID
+          const exists = localLeads.some(
+            (local) => 
+              local.mobile.replace(/\s+/g, '') === (remoteLead.phone || remoteLead.mobile || '').replace(/\s+/g, '') ||
+              local.id === remoteLead.id
+          );
+
+          if (!exists) {
+            const newLead = {
+              id: remoteLead.id || `L-${Math.floor(1000 + Math.random() * 9000)}`,
+              clientName: remoteLead.name || remoteLead.clientName || 'N/A',
+              mobile: remoteLead.phone || remoteLead.mobile || 'N/A',
+              email: remoteLead.email || 'N/A',
+              address: remoteLead.sourcePage || remoteLead.address || 'N/A',
+              serviceRequired: remoteLead.requirements || remoteLead.serviceRequired || 'uPVC Windows & Doors',
+              status: remoteLead.status || 'New',
+              source: 'Website' as const,
+              createdAt: remoteLead.createdAt || new Date().toISOString(),
+              updatedAt: remoteLead.updatedAt || new Date().toISOString(),
+              notes: `Submitted from website contact form.`
+            };
+            
+            updatedLeads.unshift(newLead);
+            mergedCount++;
+          }
+        });
+
+        if (mergedCount > 0) {
+          localStorage.setItem('renolet_leads', JSON.stringify(updatedLeads));
+          refreshData();
+          addToast('success', 'CRM Sync Complete', `Synced ${mergedCount} new lead(s) from website contact forms.`);
+        }
+      }
+    } catch (err) {
+      console.warn('[CRM Sync Warning] Failed to fetch remote leads:', err);
+    }
+  };
+
   // Initialize DB on mount
   useEffect(() => {
     RenoletDatabase.init();
     refreshData();
+    syncRemoteLeads();
   }, []);
 
   const refreshData = () => {
